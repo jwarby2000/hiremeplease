@@ -1,3 +1,4 @@
+# This code uses R
 
 setwd('C:/Users/jwarb/OneDrive/Desktop/ACTL3142 Assignment')
 train <- read.csv('training_data.csv', na.strings = c('Unknown','', 'NA'), stringsAsFactors = TRUE)
