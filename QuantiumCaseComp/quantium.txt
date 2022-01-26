@@ -1,0 +1,967 @@
+#################################
+# Downloading and Cleaning Data #
+#################################
+
+setwd('C:/Users/Jake/Desktop/R Directory')
+data = read.csv('Risky_Lending.csv', fileEncoding = 'UTF-8-BOM')
+data$Q.Factor.1 = as.factor(data$Q.Factor.1)
+data$Q.Factor.2 = as.factor(data$Q.Factor.2)
+data$Q.Factor.3 = as.factor(data$Q.Factor.3)
+data$Application.Date = as.Date(data$Application.Date)
+
+data$Account.Open.Date = ifelse(data$Account.Open.Date == 'No Clawback', NA, data$Account.Open.Date)
+data$Account.Open.Date = as.Date(data$Account.Open.Date)
+data$Account.Close.Date = ifelse(data$Account.Close.Date == 'No Clawback', NA, data$Account.Close.Date)
+data$Account.Close.Date = as.Date(data$Account.Close.Date)
+data$Close.Reason = ifelse(data$Close.Reason == 'No Clawback', 'No', data$Close.Reason)
+
+data$Close.Reason = as.factor(data$Close.Reason)
+data$Campaign.Name = as.factor(data$Campaign.Name)
+data$Interest.Rate.p.a. = data$Interest.Rate.p.a.
+####################
+# Feature Creation #
+####################
+
+periods = 12 # Monthly Payments
+data$Monthly.Int = data$Interest.Rate.p.a./periods
+
+data$Monthly.Pay = data$Loan.Amount*((data$Monthly.Int*((1+data$Monthly.Int)^(as.numeric(data$Term)*periods)))/(((1+data$Monthly.Int)^(as.numeric(data$Term)*periods))-1))
+
+data$Total.Pay = data$Monthly.Pay*data$Term*periods
+
+data$Income.Prop = data$Monthly.Pay/(data$Annual.Income/periods)
+
+data$Loan.Prop = data$Loan.Amount/data$Car.Value
+
+# How long it takes to clawback
+
+data$Clawback.Time = as.numeric(data$Account.Close.Date - data$Account.Open.Date)
+
+# Promotion cost (sometimes risky_lending has to pay a 0.5% interest rate discount for 6 months)
+
+promo = 0.005
+
+# If the clawback happens prematurely (prior to full 6 months promo time) then there is less promotion cost.
+
+length_vec = c()
+for (i in 1:length(data$Customer.ID)){
+  if(data$Clawback.Time[i] %in% NA){
+    length_vec[i] = 6
+  }
+  else{
+    if(data$Clawback.Time[i] < 30){
+      length_vec[i] = 0
+    }
+    else if(data$Clawback.Time[i] < 60){
+      length_vec[i] = 1
+    }
+    else if(data$Clawback.Time[i] < 90){
+      length_vec[i] = 2
+    }
+    else if(data$Clawback.Time[i] < 120){
+      length_vec[i] = 3
+    }
+    else if(data$Clawback.Time[i] < 150){
+      length_vec[i] = 4
+    }
+    else if(data$Clawback.Time[i] < 180){
+      length_vec[i] = 5
+    }
+    else{
+      length_vec[i] = 6
+    }
+  }
+}
+
+data$length_promo = length_vec
+
+data$Promo.Int = ifelse(data$Campaign.Offer == '0.5% discount variable rate 6 months', data$Monthly.Int - promo/periods, data$Monthly.Int)
+data$Promo.Monthly = data$Loan.Amount*((data$Promo.Int*((1+data$Promo.Int)^(as.numeric(data$Term)*periods)))/(((1+data$Promo.Int)^(as.numeric(data$Term)*periods))-1))
+data$Promo.Cost = (data$Monthly.Pay - data$Promo.Monthly)*data$length_promo
+
+# Profit
+
+comm = 0.05
+
+data$Profit = ifelse(data$Close.Reason == 'No', 
+                     comm*data$Loan.Amount - data$Data.Cost - data$Service.Cost - data$Promo.Cost,
+                     - data$Data.Cost - data$Service.Cost - data$Promo.Cost)
+
+comm = 0.035
+
+data$Profit_35 = ifelse(data$Close.Reason == 'No', 
+                        comm*data$Loan.Amount - data$Data.Cost - data$Service.Cost - data$Promo.Cost,
+                        - data$Data.Cost - data$Service.Cost - data$Promo.Cost)
+
+#######################################
+# Estimation of Non-Elapsed Clawbacks #
+#######################################
+
+data_fulltime <- data[data$Application.Date < '2020-09-27',] #Assuming collection of data stopped at the most recent close date
+length(data_fulltime$Customer.ID)
+
+library(kdensity)
+
+est_kde = kdensity(na.omit(data_fulltime$Clawback.Time))
+
+integrate(function(x) est_kde(x), lower = 30, upper = Inf)$value
+
+library(caret)
+ fitControl <- trainControl(method = 'none',
+                            classProbs = TRUE,
+                            summaryFunction = multiClassSummary)
+                                              
+gbm.est <- train(Close.Reason~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+                            +Q.Factor.2+Q.Factor.3, data = data_fulltime,
+                            method = 'gbm',
+                           trControl = fitControl,
+                            verbose = TRUE,
+                            tuneGrid = data.frame(interaction.depth =c(4),
+                                                  n.trees = c(600),
+                                                  shrinkage = c(0.01),
+                                                  n.minobsinnode =c(10)),
+                            metric = 'logLoss')
+
+
+summary(gbm.est)
+
+predict(gbm.est, newdata = data[1500,], type = 'prob')
+
+head(data)
+
+
+av_acc_create  = 21
+last_close = as.Date('2020-09-27')
+year_elapsed = as.Date('2021-09-27')
+
+elapsed_vec = c()
+clawback_prob = c()
+clawback_est = c()
+
+for(i in c(1:length(data$Customer.ID))){
+  if((year_elapsed - (data$Application.Date[i]+av_acc_create))>360){
+    elapsed_vec[i] = 360
+    clawback_est[i] = NA
+    pred = predict(gbm.est, newdata = data[i,], type = 'prob')
+    clawback_prob[i] = as.numeric(pred[1]+pred[3])
+  }
+  else{
+    elapsed_vec[i] = (year_elapsed - (data$Application.Date[i]+av_acc_create))
+    cdf = integrate(function(x) est_kde(x), lower = elapsed_vec[i], upper = Inf)$value
+    pred = predict(gbm.est, newdata = data[i,], type = 'prob')
+    clawback_prob[i] = as.numeric(pred[1]+pred[3])
+    clawback_est[i] = cdf*clawback_prob[i]
+  }
+}
+
+data$elapsed = elapsed_vec
+data$clawback_est = clawback_est
+data$clawback_prob = clawback_prob
+
+expected_prof = c()
+comm = 0.05
+
+
+for(i in c(1:length(data$Customer.ID))){
+  if(data$elapsed[i] >359){
+    expected_prof[i] = data$Profit[i] 
+  }
+  else if(data$Close.Reason[i] %in% c('DEFAULT', 'REFINANCE')){
+    expected_prof[i] = data$Profit[i] 
+  }
+  else{
+    expected_prof[i] = (1-data$clawback_est[i])*(comm*data$Loan.Amount[i] - data$Data.Cost[i] - data$Service.Cost[i] - data$Promo.Cost[i]) 
+    +  data$clawback_est[i]*(- data$Data.Cost[i] - data$Service.Cost[i] - data$Promo.Cost[i])
+  }
+}
+
+data$expected_prof = expected_prof
+
+mean(data$clawback_prob)
+
+data_full2 = data[data$Application.Date < '2020-09-27',]
+################################
+# Weak Predictions for Testing #
+################################
+
+index = sample(c(1:length(data_fulltime$Customer.ID)), 1000)
+
+gbm.early <- train(Close.Reason~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+                 +Q.Factor.2+Q.Factor.3, data = data_fulltime[index,],
+                 method = 'gbm',
+                 trControl = fitControl,
+                 verbose = TRUE,
+                 tuneGrid = data.frame(interaction.depth =c(4),
+                                       n.trees = c(600),
+                                       shrinkage = c(0.01),
+                                       n.minobsinnode =c(10)),
+                 metric = 'logLoss')
+
+summary(gbm.early)
+
+weak_prediction = data.frame(predict(gbm.early, newdata = data, type = 'prob'))
+weak_pred = weak_prediction[1] + weak_prediction[3]
+
+data$weak_pred = weak_pred$DEFAULT
+
+expected_prof = c()
+
+comm = 0.035
+
+for(i in c(1:length(data$Customer.ID))){
+    expected_prof[i] = (1-data$weak_pred[i])*(comm*data$Loan.Amount[i] - data$Data.Cost[i] - data$Service.Cost[i] - data$Promo.Cost[i]) 
+    +  data$weak_pred[i]*(- data$Data.Cost[i] - data$Service.Cost[i] - data$Promo.Cost[i])
+}
+
+data$weak_exp = expected_prof
+###########################
+# Campaign Specific Stats #
+###########################
+
+# 'Own Marketing'
+
+data_own = data_fulltime[data_fulltime$Campaign.Name == "Own marketing",]
+profit_own = sum(data_own$Profit)
+profit_own_pp = sum(data_own$Profit)/length(data_own$Customer.ID)
+own_clawback_prop = length(na.omit(data_own$Clawback.Time))/length(data_own$Clawback.Time)
+own_2 = data_fulltime[data_fulltime$Campaign.Name == "Own marketing" & data_fulltime$Close.Reason == 'REFINANCE',]
+length(na.omit(own_2$Clawback.Time))/length(data_own$Clawback.Time)
+# "RiskyLending special"
+
+data_special = data_fulltime[data_fulltime$Campaign.Name == "RiskyLending special",]
+profit_special = sum(data_special$Profit)
+profit_special_pp = sum(data_special$Profit)/length(data_special$Customer.ID)
+special_clawback_prop = length(na.omit(data_special$Clawback.Time))/length(data_special$Clawback.Time)
+special_2 = data_fulltime[data_fulltime$Campaign.Name == "RiskyLending special" & data_fulltime$Close.Reason == 'REFINANCE',]
+length(na.omit(special_2$Clawback.Time))/length(data_special$Clawback.Time)
+
+# "TV campaign - instant approvals"
+
+data_tv = data_fulltime[data_fulltime$Campaign.Name == "TV campaign - instant approvals",]
+profit_tv = sum(data_tv$Profit)
+profit_tv_pp = sum(data_tv$Profit)/length(data_tv$Customer.ID)
+tv_clawback_prop = length(na.omit(data_tv$Clawback.Time))/length(data_tv$Clawback.Time)
+
+
+
+profit_own_pp
+profit_special_pp
+profit_tv_pp
+
+###################################
+# Comparison of Estimated Results #
+###################################
+
+data_nottime = data[(!data$Application.Date < '2020-09-27'),]
+
+
+
+
+mean(data_fulltime[data_fulltime$Campaign.Name == 'Own marketing',35])
+length(data_fulltime[data_fulltime$Campaign.Name == 'Own marketing',35])
+hist(data_fulltime[data_fulltime$Campaign.Name == 'Own marketing',35])
+
+mean(data_nottime[data_nottime$Campaign.Name == 'Own marketing',40])
+length(data_nottime[data_nottime$Campaign.Name == 'Own marketing',40])
+hist(data_nottime[data_nottime$Campaign.Name == 'Own marketing',40])
+
+hist(data_nottime[data_nottime$Campaign.Name == 'Own marketing',]$clawback_est)
+hist(data_nottime[data_nottime$Campaign.Name == 'Own marketing',]$elapsed)
+
+
+
+mean(data_fulltime[data_fulltime$Campaign.Name == 'RiskyLending special',35])
+length(data_fulltime[data_fulltime$Campaign.Name == 'RiskyLending special',35])
+hist(data_fulltime[data_fulltime$Campaign.Name == 'RiskyLending special',35])
+
+
+mean(data_nottime[data_nottime$Campaign.Name == 'RiskyLending special',40])
+length(data_nottime[data_nottime$Campaign.Name == 'RiskyLending special',40])
+hist(data_nottime[data_nottime$Campaign.Name == 'RiskyLending special',40])
+
+
+mean(data_fulltime[data_fulltime$Campaign.Name == 'TV campaign - instant approvals',35])
+
+mean(data_nottime[data_nottime$Campaign.Name == 'TV campaign - instant approvals',40])
+
+
+
+
+
+
+######################
+# Data Visualisation #
+######################
+
+library(ggplot2)
+
+num_interest = c(4,5,6,7,8,28,29)
+factor_interest = c(13,14,15,19)
+
+# Numeric variables
+
+for (i in num_interest){
+  print(ggplot(data_fulltime, aes(x = Close.Reason, y=as.matrix(data_fulltime[,i]),
+                                  fill = Close.Reason)) + 
+          geom_violin(trim=FALSE)+
+          geom_boxplot(width=0.1)+
+          labs(x = 'Outcome', y = paste(names(data_fulltime)[i]))+
+          scale_fill_manual(values=c("#fc5203", "#03fc6b","#fcdf03"))+
+          theme_classic())
+}
+
+
+print(ggplot(data_fulltime, aes(x = Close.Reason, y=Loan.Prop,
+                                fill = Close.Reason)) + 
+        geom_violin(trim=FALSE)+
+        geom_boxplot(width=0.1)+
+        labs(x = 'Outcome', y = 'Loan Proportion')+
+        scale_fill_manual(values=c("#fc5203", "#03fc6b","#fcdf03"))+
+        theme_classic())
+
+
+# Factor Variables
+
+
+for (i in factor_interest){
+  print(ggplot(data_fulltime, aes(x = as.matrix(data_fulltime[i]), 
+                                  fill = Close.Reason)) + 
+          geom_bar(position = "fill")+
+          geom_hline(yintercept=0.0946, linetype="dashed", 
+                     color = "blue", size=1)+
+          geom_hline(yintercept=0.916, linetype="dashed", 
+                     color = "blue", size=1)+
+          labs(x = paste(names(data_fulltime)[i]))+
+          scale_fill_manual(values=c("#fc5203", "#03fc6b","#fcdf03"))+
+          theme_classic())
+}
+
+print(ggplot(data_fulltime, aes(x = Campaign.Name, 
+                                fill = Close.Reason)) + 
+        geom_bar(position = "fill")+
+        geom_hline(yintercept=0.0946, linetype="dashed", 
+                   color = "blue", size=1)+
+        geom_hline(yintercept=0.916, linetype="dashed", 
+                   color = "blue", size=1)+
+        labs(x = 'Campaign Name',y = 'Proportion')+
+        scale_fill_manual(values=c("#fc5203", "#03fc6b","#fcdf03"))+
+        theme_classic())
+
+
+
+hist(data_fulltime$Profit, main = 'Profit Histogram', xlab = 'Profit', col = 'lightblue')
+hist(data_fulltime$Clawback.Time, probability = T, main = 'Clawback Time Histogram', xlab = 'Time taken to Clawback', col = 'lightblue')
+
+pairs(~Income.Prop + Annual.Income + Loan.Prop + Loan.Amount, data = data_fulltime)
+
+#######################
+# Clawback Benchmarks #
+#######################
+
+# Percentage of Clawback
+
+data_full_noclaw = data_fulltime[data_fulltime$Close.Reason == 'No',]
+1 - length(data_full_noclaw$Close.Reason)/length(data_fulltime$Customer.ID)
+
+# Percentage of Default Clawback
+
+data_full_default = data_fulltime[data_fulltime$Close.Reason == 'DEFAULT',]
+length(data_full_default$Close.Reason)/length(data_fulltime$Customer.ID)
+
+# Percentage of Refinance Clawback
+
+data_full_refinance = data_fulltime[data_fulltime$Close.Reason == 'REFINANCE',]
+length(data_full_refinance$Close.Reason)/length(data_fulltime$Customer.ID)
+
+
+############################
+# Profit Bootstrap Example #
+############################
+
+profit_vector = c()
+
+sims = 100000
+
+for(i in c(1:sims)){
+  profit_vector[i] = sum(sample(data_fulltime$Profit, replace = T))
+}
+
+quantile(profit_vector, prob = 0.005)
+mean(profit_vector)
+quantile(profit_vector, prob = 0.995)
+
+###############################
+### Task 1  - Profitability ###
+###############################
+
+comm = 0.05
+
+comm_range = seq(from = 0, to = 0.05, by = 0.001)
+
+profit_matrix = matrix(nrow = length(data$Customer.ID), ncol= length(comm_range))
+
+sims = 10000
+
+expected_prof_1 = c()
+expected_prof_99 = c()
+
+for(i in c(1:length(comm_range))){
+  comm = comm_range[i]
+  profit_vec_data = ifelse(data$Close.Reason == 'No', 
+                           comm*data$Loan.Amount - data$Data.Cost - data$Service.Cost - data$Promo.Cost,
+                           - data$Data.Cost - data$Service.Cost - data$Promo.Cost)
+  expected_prof = c()
+  profit_vector = c()
+  for(z in c(1:length(data$Customer.ID))){
+    if(data$elapsed[z] >359){
+      expected_prof[z] = profit_vec_data[z] 
+    }
+    else if(data$Close.Reason[z] %in% c('DEFAULT', 'REFINANCE')){
+      expected_prof[z] = profit_vec_data[z] 
+    }
+    else{
+      expected_prof[z] = (1-data$clawback_est[z])*(comm*data$Loan.Amount[z] - data$Data.Cost[z] - data$Service.Cost[z] - data$Promo.Cost[z]) +  data$clawback_est[z]*(- data$Data.Cost[z] - data$Service.Cost[z] - data$Promo.Cost[z])
+    }
+  }
+  profit_matrix[,i] = expected_prof
+}
+
+Profits_comm = data.frame(cbind(comm_range,colSums(profit_matrix)))
+
+ggplot(Profits_comm, aes(x=comm_range)) + 
+  geom_line(aes(y = V2), color = "darkred") + 
+  geom_line(aes(y = expected_prof_1), color="steelblue", linetype="twodash")+ 
+  geom_line(aes(y = expected_prof_99), color="steelblue", linetype="twodash")+
+  theme_minimal()
+
+
+
+
+
+
+sims = 50
+
+sims_vec = c()
+expected_prof_1 = c()
+expected_prof_99 = c()
+
+for(i in c(1:length(comm_range))){
+  comm = comm_range[i]
+  profit_vec_data = ifelse(data$Close.Reason == 'No', 
+                           comm*data$Loan.Amount - data$Data.Cost - data$Service.Cost - data$Promo.Cost,
+                           - data$Data.Cost - data$Service.Cost - data$Promo.Cost)  
+for(k in c(1:sims)){
+  expected_prof = c()
+    for(y in c(1:length(data$Customer.ID))){
+      if(data$elapsed[y] >359){
+        expected_prof[y] = profit_vec_data[y] 
+      }
+      else if(data$Close.Reason[y] %in% c('DEFAULT', 'REFINANCE')){
+        expected_prof[y] = profit_vec_data[y] 
+      }
+      else{
+        prob = clawback_est[y]
+        rand = runif(1)
+        if(rand < prob){
+          expected_prof[y] = - data$Data.Cost[y] - data$Service.Cost[y] - data$Promo.Cost[y]
+        }
+        else{
+          expected_prof[y] = comm*data$Loan.Amount[y] - data$Data.Cost[y] - data$Service.Cost[y] - data$Promo.Cost[y]
+        }
+      }
+    }
+  sims_vec[k] = sum(expected_prof)
+}
+  expected_prof_1[i] = quantile(sims_vec, prob = 0.005)
+  expected_prof_99[i] = quantile(sims_vec, prob = 0.995)
+}
+
+
+
+
+Profits_comm = cbind(Profits_comm, expected_prof_1, expected_prof_99)
+
+
+
+
+
+quantile(sims_vec, prob = 0.005)
+quantile(sims_vec, prob = 0.995)
+  
+ggplot(Profits_comm, aes(x=comm_range)) + 
+  geom_line(aes(y = V2), color = "darkred") + 
+  geom_line(aes(y = expected_prof_1), color="steelblue", linetype="twodash")+ 
+  geom_line(aes(y = expected_prof_99), color="steelblue", linetype="twodash")+
+  labs(x = 'Commission', y = 'Profit')+
+  theme_minimal()
+
+
+# Short - Term Mitigation Strategies
+# In the short term we want low variance so we can stabilise and plan for the future.
+
+# Currently with no mitigation strategy - Considering accounts created within the year for short term:
+
+data_fulltime <- data[data$Application.Date < '2020-09-27',]
+data_notrain = data_fulltime[-index,]
+
+var(data_notrain$Profit_35)
+
+profit_vector = c()
+
+sims = 100000
+
+for(i in c(1:sims)){
+  profit_vector[i] = sum(sample(data_notrain$Profit_35, replace = T))
+}
+
+quantile(profit_vector, prob = 0.005)
+mean(profit_vector)
+quantile(profit_vector, prob = 0.995)
+
+# First idea, only run the special campaign
+
+special_profit = data_notrain[data_notrain$Campaign.Name == 'RiskyLending special'| data_notrain$Campaign.Name == 'Own marketing',36]
+var(special_profit)
+
+profit_vector = c()
+
+sims = 100000
+
+for(i in c(1:sims)){
+  profit_vector[i] = sum(sample(special_profit, replace = T))
+}
+
+quantile(profit_vector, prob = 0.005)
+mean(profit_vector)
+quantile(profit_vector, prob = 0.995)
+
+# While this does decrease the variance, it also heavily decreases the profit. This is not a worthy tradeoff at this time.
+# However this can be judged by the company itself
+
+# Consider taking only <10% clawback percentage
+
+clawback_range = seq(from = 0.05, to = 1, by = 0.01)
+
+profit_matrix = matrix(nrow = 6, ncol= length(clawback_range))
+
+
+
+for(i in c(1:length(clawback_range))){
+  thresh = clawback_range[i]
+  data_thresh = data_notrain[data_notrain$weak_pred < thresh, ]
+  thresh_profit = data_thresh$Profit_35
+  mean_prof = mean(thresh_profit)
+  var_prof = var(thresh_profit)
+  total_prof = sum(thresh_profit)
+  profit_matrix[1,i] = mean_prof
+  profit_matrix[2,i] = var_prof
+  profit_matrix[3,i] = total_prof
+  profit_matrix[4,i] = length(data_thresh$Customer.ID)
+  profit_vector = c()
+  
+  sims = 10000
+  
+  for(z in c(1:sims)){
+    profit_vector[z] = sum(sample(thresh_profit, replace = T))
+  }
+  
+  profit_matrix[5,i] = quantile(profit_vector, prob = 0.005)
+  profit_matrix[6,i] = quantile(profit_vector, prob = 0.995)
+}  
+
+test = data.frame(rbind(as.numeric(clawback_range), profit_matrix))
+
+plot(as.numeric(test[1,]), as.numeric(test[4,]))
+lines(as.numeric(test[1,]), as.numeric(test[6,]))
+lines(as.numeric(test[1,]), as.numeric(test[7,]))
+  
+# We make a recommendation but ultimately have the data here for the company to choose themselves
+
+# We also take expected value for ideas
+
+exp_range = seq(from = min(data_notrain$weak_exp), to = max(data_notrain$weak_exp), by = 10)
+
+profit_matrix = matrix(nrow = 6, ncol= length(exp_range))
+
+for(i in c(1:length(exp_range))){
+  thresh = exp_range[i]
+  data_thresh = data_notrain[data_notrain$weak_exp > thresh, ]
+  thresh_profit = data_thresh$Profit_35
+  mean_prof = mean(thresh_profit)
+  var_prof = var(thresh_profit)
+  total_prof = sum(thresh_profit)
+  profit_matrix[1,i] = mean_prof
+  profit_matrix[2,i] = var_prof
+  profit_matrix[3,i] = total_prof
+  profit_matrix[4,i] = length(data_thresh$Customer.ID)
+  profit_vector = c()
+  
+  sims = 10000
+  
+  for(z in c(1:sims)){
+    profit_vector[z] = sum(sample(thresh_profit, replace = T))
+  }
+  
+  profit_matrix[5,i] = quantile(profit_vector, prob = 0.005)
+  profit_matrix[6,i] = quantile(profit_vector, prob = 0.995)
+}  
+
+test = data.frame(rbind(as.numeric(exp_range), profit_matrix))
+
+plot(as.numeric(test[1,]), as.numeric(test[4,]))
+lines(as.numeric(test[1,]), as.numeric(test[6,]))
+lines(as.numeric(test[1,]), as.numeric(test[7,]))
+
+test_frame = data.frame('aaa' = as.numeric(test[1,]), 'bbb' =as.numeric(test[4,]), 'ccc' =as.numeric(test[6,]) , 'ddd'=as.numeric(test[7,]))
+
+
+ggplot(test_frame[c(1:423),], aes(x = aaa)) + 
+  geom_line(aes(y = bbb), color = "darkred")+
+  geom_line(aes(y = ccc), color="steelblue", linetype="twodash")+ 
+  geom_line(aes(y = ddd), color="steelblue", linetype="twodash")+
+  labs(x = 'EV Threshold', y = 'Profit')+
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE))+
+  theme_minimal()
+
+
+### With probability sims
+
+exp_range = seq(from = min(data_notrain$weak_exp), to = max(data_notrain$weak_exp), by = 50)
+
+profit_matrix = matrix(nrow = 6, ncol= length(exp_range))
+
+sims = 5
+
+expected_prof_1 = c()
+expected_prof_99 = c()
+
+for(i in c(1:length(exp_range))){
+  thresh = exp_range[i]
+  data_thresh = data_notrain[data_notrain$weak_exp > thresh, ]
+  thresh_profit = data_thresh$Profit_35
+  mean_prof = mean(thresh_profit)
+  var_prof = var(thresh_profit)
+  total_prof = sum(thresh_profit)
+  profit_matrix[1,i] = mean_prof
+  profit_matrix[2,i] = var_prof
+  profit_matrix[3,i] = total_prof
+  profit_matrix[4,i] = length(data_thresh$Customer.ID)
+  profit_vector = c()
+  
+  for(z in c(1:sims)){
+    profit_vector[z] = sum(sample(thresh_profit, replace = T))
+  }
+  
+  profit_matrix[5,i] = quantile(profit_vector, prob = 0.005)
+  profit_matrix[6,i] = quantile(profit_vector, prob = 0.995)
+
+}  
+
+
+
+test = data.frame(rbind(as.numeric(exp_range), profit_matrix))
+
+plot(as.numeric(test[1,]), as.numeric(test[4,]))
+lines(as.numeric(test[1,]), as.numeric(test[6,]))
+lines(as.numeric(test[1,]), as.numeric(test[7,]))
+
+test_frame = data.frame('aaa' = as.numeric(test[1,]), 'bbb' =as.numeric(test[4,]), 'ccc' =as.numeric(test[6,]) , 'ddd'=as.numeric(test[7,]))
+
+
+ggplot(test_frame[c(1:423),], aes(x = aaa)) + 
+  geom_line(aes(y = bbb), color = "darkred")+
+  geom_line(aes(y = ccc), color="steelblue", linetype="twodash")+ 
+  geom_line(aes(y = ddd), color="steelblue", linetype="twodash")+
+  theme_minimal()
+
+
+
+
+
+
+
+
+
+
+
+
+
+for(k in c(1:sims)){
+  expected_prof = c()
+  for(y in c(1:length(data$Customer.ID))){
+    if(data$elapsed[y] >359){
+      expected_prof[y] = profit_vec_data[y] 
+    }
+    else if(data$Close.Reason[y] %in% c('DEFAULT', 'REFINANCE')){
+      expected_prof[y] = profit_vec_data[y] 
+    }
+    else{
+      prob = clawback_est[y]
+      rand = runif(1)
+      if(rand < prob){
+        expected_prof[y] = - data$Data.Cost[y] - data$Service.Cost[y] - data$Promo.Cost[y]
+      }
+      else{
+        expected_prof[y] = comm*data$Loan.Amount[y] - data$Data.Cost[y] - data$Service.Cost[y] - data$Promo.Cost[y]
+      }
+    }
+  }
+  sims_vec[k] = sum(expected_prof)
+}
+expected_prof_1[i] = quantile(sims_vec, prob = 0.005)
+expected_prof_99[i] = quantile(sims_vec, prob = 0.995)
+
+
+# Using the training samples
+
+exp_range = seq(from = min(data_full2$expected_prof), to = max(data_full2$expected_prof), by = 10)
+
+profit_matrix = matrix(nrow = 6, ncol= length(exp_range))
+
+for(i in c(1:length(exp_range))){
+  thresh = exp_range[i]
+  data_thresh = data_full2[data_full2$expected_prof > thresh, ]
+  thresh_profit = data_thresh$Profit_35
+  mean_prof = mean(thresh_profit)
+  var_prof = var(thresh_profit)
+  total_prof = sum(thresh_profit)
+  profit_matrix[1,i] = mean_prof
+  profit_matrix[2,i] = var_prof
+  profit_matrix[3,i] = total_prof
+  profit_matrix[4,i] = length(data_thresh$Customer.ID)
+  profit_vector = c()
+  
+  sims = 10000
+  
+  for(z in c(1:sims)){
+    profit_vector[z] = sum(sample(thresh_profit, replace = T))
+  }
+  
+  profit_matrix[5,i] = quantile(profit_vector, prob = 0.005)
+  profit_matrix[6,i] = quantile(profit_vector, prob = 0.995)
+}  
+
+test = data.frame(rbind(as.numeric(exp_range), profit_matrix))
+
+plot(as.numeric(test[1,]), as.numeric(test[4,]))
+lines(as.numeric(test[1,]), as.numeric(test[6,]))
+lines(as.numeric(test[1,]), as.numeric(test[7,]))
+
+
+
+
+
+
+
+
+
+# Discounting
+
+d_decrease = function(x){
+  return(6*x)
+}
+
+mean(data$Loan.Amount)
+mean(data$Interest.Rate.p.a.)
+
+# Our example setup is $66000 loan amount. x discount rate, 20% clawback probability.
+comm = 0.05
+promo = 0.005
+Term = 4
+Loan = 100000
+clawback = 0.20
+Data = 300
+Service = 300
+
+Month_Int = 0.042/12
+Month_Pay = Loan*((Month_Int*((1+Month_Int)^(Term*12)))/(((1+Month_Int)^(Term*12))-1))
+Promo_Int = Month_Int - promo/12
+
+Month_Promo = Loan*((Promo_Int*((1+Promo_Int)^(Term*12)))/(((1+Promo_Int)^(Term*12))-1))
+Promo_Cost = (Month_Pay - Month_Promo)*6
+
+
+promo_range = seq(from = 0, to = 0.041, by = 0.001)
+exp_vec = c()
+
+for(i in c(1:length(promo_range))){
+  promo = promo_range[i]
+  Promo_Int = Month_Int - promo/12
+  Month_Promo = Loan*((Promo_Int*((1+Promo_Int)^(Term*12)))/(((1+Promo_Int)^(Term*12))-1))
+  Promo_Cost = (Month_Pay - Month_Promo)*6
+  Dec = d_decrease(promo)
+  exp_vec[i] = (1 - (max(clawback - Dec,0)))*(Loan*comm - Data - Service - Promo_Cost) + (max(clawback - Dec,0))*(- Data - Service - Promo_Cost)
+}
+
+promo_m = data.frame(promo_range, exp_vec)
+plot(promo_m$promo_range, promo_m$exp_vec)
+
+ggplot(promo_m, aes(x = promo_range, y = exp_vec))+
+  geom_line(col = 'blue')+
+  geom_hline(yintercept=3450, linetype="dashed", color = "red")+
+  labs(x = 'Possible Discount', y = 'Expected Value')+
+  theme_minimal()
+
+# Looking over time 
+
+min(data$Application.Date)
+max(data$Application.Date)
+
+# All these are fully elapsed loans
+
+
+
+
+
+
+pre_covid = data[data$Application.Date < '2021-07-07'&data$Application.Date > '2020-07-07',]
+days_pre = max(pre_covid$Application.Date)- min(pre_covid$Application.Date)
+profit_pre = sum(pre_covid$Profit)
+profit_pre_pd = profit_pre/as.numeric(days_pre)
+profit_pre_pp = profit_pre/length(pre_covid$Customer.ID)
+pre_perday = length(pre_covid$Customer.ID)/as.numeric(days_pre)
+pre_clawback_prop = length(na.omit(pre_covid$Clawback.Time))/length(pre_covid$Clawback.Time)
+pre_default = pre_covid[pre_covid$Close.Reason == 'DEFAULT', ]
+length(na.omit(pre_default$Clawback.Time))/length(pre_covid$Clawback.Time)
+mean(pre_covid$Term)
+mean(pre_covid$Loan.Amount)
+mean(pre_covid$Annual.Income)
+mean(pre_covid$Car.Value)
+mean(pre_covid$Interest.Rate.p.a.)
+mean(pre_covid$Loan.Prop)
+mean(pre_covid$Income.Prop)
+
+after_covid = data[data$Application.Date > '2020-02-20' & data$Application.Date<'2020-09-09',]
+days_after = max(after_covid$Application.Date)- min(after_covid$Application.Date)
+profit_after = sum(after_covid$Profit)
+profit_after_pd = profit_after/as.numeric(days_after)
+profit_after_pp = profit_after/length(after_covid$Customer.ID)
+after_perday = length(after_covid$Customer.ID)/as.numeric(days_after)
+after_clawback_prop = length(na.omit(after_covid$Clawback.Time))/length(after_covid$Clawback.Time)
+after_default = after_covid[after_covid$Close.Reason == 'DEFAULT', ]
+length(na.omit(after_default$Clawback.Time))/length(after_covid$Clawback.Time)
+mean(after_covid$Term)
+mean(after_covid$Loan.Amount)
+mean(after_covid$Annual.Income)
+mean(after_covid$Car.Value)
+mean(after_covid$Interest.Rate.p.a.)
+mean(after_covid$Loan.Prop)
+mean(after_covid$Income.Prop)
+
+later_covid = data[data$Application.Date > "2021-01-01" & data$Application.Date<"2021-09-27",]
+days_later = max(later_covid$Application.Date)- min(later_covid$Application.Date)
+profit_later = sum(later_covid$Profit)
+profit_later_pd = profit_later/as.numeric(days_later)
+profit_later_pp = profit_later/length(later_covid$Customer.ID)
+later_perday = length(later_covid$Customer.ID)/as.numeric(days_later)
+later_clawback_prop = length(na.omit(later_covid$Clawback.Time))/length(later_covid$Clawback.Time)
+later_default = later_covid[later_covid$Close.Reason == 'DEFAULT', ]
+length(na.omit(later_default$Clawback.Time))/length(later_covid$Clawback.Time)
+mean(later_covid$Term)
+mean(later_covid$Loan.Amount)
+mean(later_covid$Annual.Income)
+mean(later_covid$Car.Value)
+mean(later_covid$Interest.Rate.p.a.)
+mean(later_covid$Loan.Prop)
+mean(later_covid$Income.Prop)
+
+
+
+
+# Roc Curve Plot
+
+library(randomForest)
+library(gbm)
+library(MASS)
+
+data_fulltime$Clawback = ifelse(as.character(data_fulltime$Close.Reason) %in% c('DEFAULT', 'REFINANCE'), 'Yes', 'No')
+data_fulltime$Clawback = as.factor(data_fulltime$Clawback)
+
+index = sample(c(1:length(data_fulltime$Customer.ID)), 900)
+
+ROC_Data = data_fulltime[index,]
+ROC_Data_2 = data_fulltime[-index,]
+
+gbm.r <- train(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+                   +Q.Factor.2+Q.Factor.3, data = ROC_Data,
+                   method = 'gbm',
+                   trControl = fitControl,
+                   verbose = TRUE,
+                   tuneGrid = data.frame(interaction.depth =c(4),
+                                         n.trees = c(500),
+                                         shrinkage = c(0.01),
+                                         n.minobsinnode =c(10)),
+                   metric = 'logLoss')
+
+
+gbm.pred = predict(gbm.r, newdata = ROC_Data_2, type = 'prob')
+
+gbm.pred = gbm.pred[,2]
+
+
+log.r <- glm(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+             +Q.Factor.2+Q.Factor.3, family = 'binomial', data = ROC_Data)
+
+
+log.pred = predict(log.r, newdata = ROC_Data_2, type = 'response')
+
+
+rf.r <- randomForest(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+                     +Q.Factor.2+Q.Factor.3, data = ROC_Data)
+
+rf.pred = predict(rf.r, newdata = ROC_Data_2, type = 'prob')
+
+rf.pred = rf.pred[,2]
+
+bag.r <- randomForest(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+                      +Q.Factor.2+Q.Factor.3, data = ROC_Data, mtry = 7)
+
+bag.pred = predict(bag.r, newdata = ROC_Data_2, type = 'prob')
+
+bag.pred = bag.pred[,2]
+
+
+lda.r <- lda(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+             +Q.Factor.2+Q.Factor.3, data = ROC_Data)
+  
+lda.pred = predict(lda.r, newdata = ROC_Data_2)
+
+lda.pred = lda.pred$posterior
+
+lda.pred = lda.pred[,2]
+
+qda.r <- qda(Clawback~Loan.Prop+Income.Prop+Term+Loan.Amount+Annual.Income
+             +Q.Factor.2+Q.Factor.3, data = ROC_Data)
+
+qda.pred = predict(qda.r, newdata = ROC_Data_2)
+
+qda.pred = qda.pred$posterior
+
+qda.pred = qda.pred[,2]
+
+
+
+library(pROC)
+
+log.roc <- roc(ROC_Data_2$Clawback, log.pred)
+
+bag.roc <- roc(ROC_Data_2$Clawback, bag.pred)
+
+rf.roc <- roc(ROC_Data_2$Clawback, rf.pred)
+
+lda.roc <- roc(ROC_Data_2$Clawback, lda.pred)
+
+qda.roc <-  roc(ROC_Data_2$Clawback, qda.pred)
+
+gbm.roc <- roc(ROC_Data_2$Clawback, gbm.pred)
+
+plot(log.roc, col = 'grey', main = 'ROC Curve')
+plot(bag.roc, add = TRUE, col = 'grey')
+plot(rf.roc, add = TRUE, col = 'grey')
+plot(lda.roc, add = TRUE, col = 'grey')
+plot(qda.roc, add = TRUE, col = 'grey')
+plot(gbm.roc, add = TRUE, col = 'blue')
+legend('bottomright', legend = c('Boosted', 'Other'), col = c('blue', 'grey'), lty = c(1,1))
+
+data_new = data.frame(data)
+data_new$Service.Cost = ifelse(data_new$Service.Cost - 100 > 0, data_new$Service.Cost - 100, 0)
