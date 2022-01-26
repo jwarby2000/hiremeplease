@@ -1,0 +1,772 @@
+
+setwd('C:/Users/jwarb/OneDrive/Desktop/ACTL3142 Assignment')
+train <- read.csv('training_data.csv', na.strings = c('Unknown','', 'NA'), stringsAsFactors = TRUE)
+eval <- read.csv('eval_data.csv', na.strings = c('Unknown','', 'NA'), stringsAsFactors = TRUE)
+library(naniar)
+vis_miss(train[,49:50], warn_large_data = FALSE)
+vis_miss(eval[,39:49])
+
+train = train[-c(1,23)] # After importing the train data, remove the ID and
+#Service Area
+
+# Categorical and Continuous Indexes
+
+icat = c(1,21:23,27:42,44:48)
+icont = c(1:48)[-icat]
+
+# Plotting the histograms of each predictor to see if there is anything obviously wrong
+
+library(ggplot2)
+library(plyr)
+
+par(mfrow = c(3,3))
+hist.data.frame(train[-1]) # There may be an issue with AgeHH1 and AgeHH2
+
+# Continous v Churn
+
+library(ggplot2)
+for (i in icont){
+  mu <- aggregate(train[,i], list(Churn = train$Churn), mean, na.rm = TRUE)
+  print(ggplot(train, aes(x= as.matrix(train[i]), color = Churn, fill = Churn))+
+    geom_density(alpha=0.5)+
+    geom_vline(data = mu, aes(xintercept = x, color = Churn), linetype = 'dashed')+  
+  labs(x = paste(names(train)[i]))+
+    theme_classic())
+}
+
+# Categorical v Churn
+
+for (i in icat){
+  print(ggplot(train, aes(x = as.matrix(train[i]), 
+                    fill = Churn)) + 
+    geom_bar(position = "fill")+
+    labs(x = paste(names(train)[i]))+
+      geom_abline(slope=0, intercept=0.288,  col = "blue",lty=2)+
+    theme_classic())
+}
+
+# Imputation
+
+install.packages('Hmisc')
+library(Hmisc)
+
+fmla <- as.formula(paste(" ~ ", paste(names(train), collapse=" +")))
+impute_hmisc <- aregImpute(fmla, data = train, n.impute = 5, nk=0)
+
+par(mfrow = c(1,2))
+hist(impute_hmisc$imputed$HandsetPrice[,1], freq = FALSE, main = 'Imputed Handset Prices', breaks = 8, xlab = 'Handset Prices')
+hist(train$HandsetPrice, freq = FALSE, main = 'Train Handset Prices', breaks = 15, xlim = c(0,300), xlab = 'Handset Prices')
+
+# Replacing NA values with the average imputation value
+train$MaritalStatus = as.numeric(as.factor(train$MaritalStatus))
+train$MonthlyRevenue[is.na(train$MonthlyRevenue)] <- apply(impute_hmisc$imputed$MonthlyRevenue,1,mean)
+train$MonthlyMinutes[is.na(train$MonthlyMinutes)] <- apply(impute_hmisc$imputed$MonthlyMinutes,1,mean)
+train$TotalRecurringCharge[is.na(train$TotalRecurringCharge)] <- apply(impute_hmisc$imputed$TotalRecurringCharge,1,mean)
+train$OverageMinutes[is.na(train$OverageMinutes)] <- apply(impute_hmisc$imputed$OverageMinutes,1,mean)
+train$RoamingCalls[is.na(train$RoamingCalls)] <- round(apply(impute_hmisc$imputed$RoamingCalls,1,mean))
+train$Handsets[is.na(train$Handsets)] <- round(apply(impute_hmisc$imputed$Handsets,1,mean))
+train$HandsetModels[is.na(train$HandsetModels)] <- round(apply(impute_hmisc$imputed$HandsetModels,1,mean))
+train$CurrentEquipmentDays[is.na(train$CurrentEquipmentDays)] <- round(apply(impute_hmisc$imputed$CurrentEquipmentDays,1,mean))
+train$AgeHH1[is.na(train$AgeHH1)] <- round(apply(impute_hmisc$imputed$AgeHH1,1,mean))
+train$AgeHH2[is.na(train$AgeHH2)] <- round(apply(impute_hmisc$imputed$AgeHH2,1,mean))
+train$HandsetPrice[is.na(train$HandsetPrice)] <- round(apply(impute_hmisc$imputed$HandsetPrice,1,mean))
+train$MaritalStatus[is.na(train$MaritalStatus)] <- round(apply(impute_hmisc$imputed$MaritalStatus,1,mean))
+train$MaritalStatus <- as.factor(ifelse(train$MaritalStatus == 1, 'No', 'Yes'))
+
+# Creating the train/test set
+train_index = sample(40000,30000)
+train_set = train[train_index,]
+test_set = train[-train_index,]
+
+# Correlation
+
+dummytraining <- dummyVars("~.", data = na.omit(train))
+dummyt <- data.frame(predict(dummytraining, newdata = na.omit(train)))
+cor_matrix <- round(cor(dummyt),2)
+library(reshape2)
+melt_cor <- melt(cor_matrix)
+churn_cor = melt_cor[melt_cor$Var2 == 'Churn.Yes',]
+ordered_cor = churn_cor[order(-abs(churn_cor$value)),]
+row.names(ordered_cor) <- NULL
+top_cor = ordered_cor[3:22,]
+row.names(top_cor) <- NULL
+
+# Correlation Heat Map
+head(melt_cor)
+ggplot(data = ordered_cor[c(16:20,22,23,24,25,26,27),], aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1))+
+  coord_fixed()+
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 3)
+  
+
+# Imbalanced Data Balancing for train/test set
+
+table(train$Churn)
+prop.table(table(train$Churn))
+
+library(ROSE)
+train_up <- ovun.sample(Churn~., data = train_set, method = 'over', p = 0.5)$data #Only on the train data
+table(train_up$Churn)
+prop.table(table(train_up$Churn))
+train_down <- ovun.sample(Churn~., data = train_set, method = 'under', p=0.5)$data
+table(train_down$Churn)
+prop.table(table(train_down$Churn))
+
+##### Models
+install.packages('MLmetrics')
+library(MLmetrics)
+train$Churn <- relevel(train$Churn, ref = "Yes") # This is for the positive class
+
+# Setting up Train Controls for Caret
+library(caret)
+fitControl <-  trainControl(method = 'cv',
+                             number = 5,
+                             summaryFunction = prSummary,
+                             classProbs = TRUE,
+                            allowParallel = TRUE)
+
+fitControl.up <- trainControl(method = 'cv',
+                              number = 5,
+                              summaryFunction = prSummary,
+                              sampling = 'up',
+                              classProbs = TRUE,
+                              allowParallel = TRUE)
+
+fitControl.down <- trainControl(method = 'cv',
+                              number = 5,
+                              summaryFunction = prSummary,
+                              sampling = 'down',
+                              classProbs = TRUE,
+                              allowParallel = TRUE)
+### Logistic
+
+log.fit <- train(Churn~., data = train,
+                 method = 'glm',
+                 family = 'binomial',
+                 trControl = fitControl)
+
+log.fit.down <- train(Churn~., data = train,
+                 method = 'glm',
+                 family = 'binomial',
+                 trControl = fitControl.down)
+log.fit.up <- train(Churn~., data = train,
+                    method = 'glm',
+                    family = 'binomial',
+                    trControl = fitControl.up)
+
+# With Validation Set for Plotting 
+
+train.logistic <- glm(Churn~., data = train_set, family = binomial)
+train.logistic.pred <- predict(train.logistic, type='response', newdata = test_set)
+log.churn = rep('No', 10000)
+thresh = sort(train.logistic.pred,decreasing =TRUE)[3001]
+log.churn[train.logistic.pred>thresh] = 'Yes'
+table(log.churn, test_set$Churn)
+confusionMatrix(data = as.factor(log.churn), reference = test_set$Churn)
+
+log.roc <- roc(test_set$Churn, train.logistic.pred)
+plot.roc(log.roc, main = 'ROC Curve')
+library(PRROC)
+fg.log <- train.logistic.pred[test_set$Churn == 'Yes']
+bg.log <- train.logistic.pred[test_set$Churn == 'No']
+pr.log <- pr.curve(scores.class0 = fg.log, scores.class1 = bg.log, curve = T)
+plot(pr)
+
+### Best Subset Logistic
+
+library(MASS)
+
+# Finding the best predictors
+
+log.step.fit <- train(Churn~., data = train,
+                 method = 'glmStepAIC',
+                 family = 'binomial',
+                 trControl = fitControl,
+                 direction = 'both',
+                 k = log(26667))
+
+# CV with the best predictors
+
+log.step.fit <- train(Churn~MonthlyRevenue+MonthlyMinutes+TotalRecurringCharge+DroppedCalls+
+                        MonthsInService+Handsets+CurrentEquipmentDays+AgeHH1+ChildrenInHH+
+                        HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                        MadeCallToRetentionTeam+CreditRating+PrizmCode, data = train,
+                      method = 'glm',
+                      family = 'binomial',
+                      trControl = fitControl)
+
+log.step.up <- train(Churn~MonthlyRevenue+MonthlyMinutes+TotalRecurringCharge+DroppedCalls+
+                       MonthsInService+Handsets+CurrentEquipmentDays+AgeHH1+ChildrenInHH+
+                       HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                       MadeCallToRetentionTeam+CreditRating+PrizmCode, data = train,
+                      method = 'glm',
+                      family = 'binomial',
+                      trControl = fitControl.up)
+
+log.step.down <- train(Churn~MonthlyRevenue+MonthlyMinutes+TotalRecurringCharge+DroppedCalls+
+                         MonthsInService+Handsets+CurrentEquipmentDays+AgeHH1+ChildrenInHH+
+                         HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                         MadeCallToRetentionTeam+CreditRating+PrizmCode, data = train,
+                      method = 'glm',
+                      family = 'binomial',
+                      trControl = fitControl.down)
+
+step <- stepAIC(train.logistic, direction = 'both', trace = FALSE, k=log(length(train_set$Churn)))
+train.stepwise <- glm(Churn~MonthlyRevenue+MonthlyMinutes+TotalRecurringCharge+DroppedCalls+
+                        MonthsInService+Handsets+CurrentEquipmentDays+AgeHH1+ChildrenInHH+
+                        HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                        MadeCallToRetentionTeam+CreditRating+PrizmCode, data = train_set, family = binomial)
+train.stepwise.pred <- predict(train.stepwise, type='response', newdata = test_set)
+step.churn = rep('No', 10000)
+thresh = sort(train.stepwise.pred,decreasing =TRUE)[3001]
+step.churn[train.stepwise.pred>thresh] = 'Yes'
+table(step.churn, test_set$Churn)
+confusionMatrix(data = as.factor(step.churn), reference = test_set$Churn)
+
+step.roc <- roc(test_set$Churn, train.stepwise.pred)
+step.roc
+plot.roc(step.roc, main = 'ROC Curve')
+fg <- train.stepwise.pred[test_set$Churn == 'Yes']
+bg <- train.stepwise.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+
+# Logistic Ridge
+
+install.packages('glmnet')
+library(glmnet)
+grid = 10^seq(2,-7,length=500)
+x <- model.matrix(Churn~., train_set)[,-1]
+x_test <- model.matrix(Churn~., test_set)[,-1]
+ridge.cv <- cv.glmnet(x, train_set$Churn, alpha = 0, family = binomial)
+plot(ridge.cv)
+bestlam = ridge.cv$lambda.min
+bestlam2 = ridge.cv$lambda.1se
+train.ridge = glmnet(x, train_up$Churn, alpha = 0, family = binomial)
+train.ridge2 = glmnet(x, train_balanced$Churn, alpha = 0, family = binomial, lambda=grid)
+plot(train.ridge2)
+
+ridge_grid = expand.grid(alpha = c(0), lambda = grid)
+nrow(ridge_grid)
+
+ridge.fit <- train(Churn~., data = train,
+                        method = 'glmnet',
+                        family = 'binomial',
+                        tuneGrid = ridge_grid,
+                        trControl = fitControl,
+                   metric = 'AUC')
+
+ridge.fit.down <- train(Churn~., data = train,
+                           method = 'glmnet',
+                           family = 'binomial',
+                           tuneGrid = ridge_grid,
+                           trControl = fitControl.down,
+                        metric = 'ROC')
+
+ridge.fit.up <- train(Churn~., data = train,
+                         method = 'glmnet',
+                         family = 'binomial',
+                         tuneGrid = ridge_grid,
+                         trControl = fitControl.up,
+                      metric = 'ROC')
+
+ridge.pred = predict(train.ridge, s=0.008667139, newx = x_test, type='response')
+ridge.churn = rep('No', 10000)
+thresh = sort(ridge.pred,decreasing =TRUE)[3001]
+ridge.churn[ridge.pred>thresh] = 'Yes'
+table(ridge.churn, test_set$Churn)
+confusionMatrix(data = as.factor(ridge.churn), reference = test_set$Churn)
+
+ridge.roc <- roc(test_set$Churn, ridge.pred)
+ridge.roc
+plot.roc(ridge.roc, main = 'ROC Curve')
+fg <- ridge.pred[test_set$Churn == 'Yes']
+bg <- ridge.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+# Logistic Lasso
+train_set_bin <- data.frame(train_set)
+train_set_bin$Churn <- ifelse(train_set_bin$Churn == 'Yes', 1, 0)
+
+
+train.lasso <- glmnet(x, train_set_bin$Churn, alpha = 1, family = binomial)
+train.lasso2 <- glmnet(x, train_set_bin$Churn, alpha = 1, family = binomial, lambda=grid)
+plot(train.lasso2)
+lasso.cv <- cv.glmnet(x, train_set_bin$Churn, alpha = 1, family = binomial)
+plot(lasso.cv)
+bestlam = lasso.cv$lambda.min
+bestlam2 = lasso.cv$lambda.1se
+
+lasso_grid = expand.grid(alpha = c(1), lambda = grid)
+nrow(lasso_grid)
+
+lasso.fit <- train(Churn~., data = train,
+                   method = 'glmnet',
+                   family = 'binomial',
+                   tuneGrid = lasso_grid,
+                   trControl = fitControl,
+                   metric = 'AUC')
+
+lasso.fit.down <- train(Churn~., data = train,
+                        method = 'glmnet',
+                        family = 'binomial',
+                        tuneGrid = lasso_grid,
+                        trControl = fitControl.down,
+                        metric = 'ROC')
+
+lasso.fit.up <- train(Churn~., data = train,
+                      method = 'glmnet',
+                      family = 'binomial',
+                      tuneGrid = lasso_grid,
+                      trControl = fitControl.up,
+                      metric = 'ROC')
+
+lasso.pred = predict(train.lasso, s=bestlam2, newx = x_test, type='response')
+lasso.coef = predict(train.lasso, s=bestlam, newx = x_test, type='coefficient')
+lasso.coef2 = predict(train.lasso, s=bestlam2, newx = x_test, type='coefficient')
+thresh = sort(lasso.pred,decreasing =TRUE)[3001]
+lasso.churn = rep('No', 10000)
+lasso.churn[lasso.pred>thresh] = 'Yes'
+table(lasso.churn, test_set$Churn)
+confusionMatrix(data = as.factor(lasso.churn), reference = test_set$Churn)
+
+lasso.roc <- roc(test_set$Churn, lasso.pred)
+plot.roc(lasso.roc, main = 'ROC Curve')
+fg <- lasso.pred[test_set$Churn == 'Yes']
+bg <- lasso.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+### GAM
+
+install.packages('gam')
+library(gam)
+library(mgcv)
+gam.fit <- train(Churn~MonthlyRevenue+MonthlyMinutes+TotalRecurringCharge+DroppedCalls+
+                   MonthsInService+Handsets+CurrentEquipmentDays+AgeHH1+ChildrenInHH+
+                   HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                   MadeCallToRetentionTeam+PrizmCode, data = train,
+                 method = 'gam',
+                 family = 'binomial',
+                 trControl = fitControl,
+                 tuneGrid = data.frame(select = c(FALSE), method = c('GCV.Cp')),
+                 metric = 'AUC')
+
+gam.fit.down <- train(Churn~., data = train,
+                      method = 'gam',
+                      family = 'binomial',
+                      trControl = fitControl.down,
+                      tuneGrid = data.frame(select = c(FALSE), method = c('GCV.Cp')),
+                      metric = 'AUC')
+
+gam.fit.up <- train(Churn~., data = train,
+                    method = 'gam',
+                    family = 'binomial',
+                    trControl = fitControl.up,
+                    tuneGrid = data.frame(select = c(FALSE), method = c('GCV.Cp')),
+                    metric = 'AUC')
+
+test.gam <- gam(Churn~s(MonthlyRevenue)+s(MonthlyMinutes)+s(TotalRecurringCharge)+s(DroppedCalls)+
+                  s(MonthsInService)+s(Handsets)+s(CurrentEquipmentDays)+s(AgeHH1)+ChildrenInHH+
+                  HandsetRefurbished+HandsetWebCapable+RespondsToMailOffers+
+                  MadeCallToRetentionTeam+CreditRating+PrizmCode, data = train_set, family = binomial)
+gam.pred <- predict(test.gam, newdata=test_set, type = 'response')
+gam.churn = rep('No', 10000)
+thresh = sort(gam.pred,decreasing =TRUE)[3001]
+gam.churn[gam.pred>thresh] = 'Yes'
+table(gam.churn, test_set$Churn)
+confusionMatrix(data = as.factor(gam.churn), reference = test_set$Churn)
+
+gam.roc <- roc(test_set$Churn, gam.pred)
+gam.roc
+plot.roc(gam.roc, main = 'ROC Curve')
+
+fg <- gam.pred[test_set$Churn == 'Yes']
+bg <- gam.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+### KNN
+
+dummy_train <- cbind(Churn=as.factor(train$Churn),model.matrix(Churn~., train)[,-1][,!sapply(train[-1], is.numeric)])
+
+scaled_train <- data.frame(cbind(dummy_train,scale(train[sapply(train, is.numeric)])))
+scaled_train$Churn <- as.factor(scaled_train$Churn)
+levels(scaled_train$Churn) = c('No','Yes')
+
+knn_grid <- data.frame(k = c(50,75,100,110,120,130,140,150,160,170,180,190,200))
+
+knn.fit <- train(Churn~., data = scaled_train,
+                 method = 'knn',
+                 trControl = fitControl,
+                 tuneGrid = knn_grid,
+                 metric = 'AUC')
+
+knn.fit.down <- train(Churn~., data = scaled_train,
+                      method = 'knn',
+                      trControl = fitControl.down,
+                      tuneGrid = knn_grid,
+                      metric = 'ROC')
+
+knn.fit.up <- train(Churn~., data = scaled_train,
+                    method = 'knn',
+                    trControl = fitControl.up,
+                    tuneGrid = knn_grid,
+                    metric = 'ROC')
+
+scaled_train_set <- as.data.frame(scaled_train[train_index,])
+scaled_test_set <- as.data.frame(scaled_train[-train_index,])
+
+library(class)
+knn.pred <- knn(scaled_train_set[-1], scaled_test_set[-1], scaled_train_set$Churn, k = 170, prob = TRUE)
+knn.pred <- attributes(knn.pred)$prob
+knn.pred <- 1-knn.pred
+thresh = sort(knn.pred,decreasing =TRUE)[3001]
+knn.churn = rep('No', 10000)
+knn.churn[knn.pred>(thresh-0.0001)] = 'Yes'
+table(knn.churn, test_set$Churn)
+confusionMatrix(data = as.factor(knn.churn), reference = test_set$Churn)
+
+knn.roc <- roc(test_set$Churn, knn.pred)
+knn.roc
+plot.roc(knn.roc, main = 'ROC Curve')
+fg <- knn.pred[test_set$Churn == 'Yes']
+bg <- knn.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+# Decision Tree
+library(tree)
+
+train.tree <- tree(Churn~., data = train_up)
+cv.traintree <- cv.tree(train.tree)
+
+text(train.tree)
+
+tree.prob <- predict(train.tree, newdata = test_set, type = 'vector')[,2]
+tree.class <- predict(train.tree, newdata = test_set, type = 'class')
+table(tree.pred, test_set$Churn)
+confusionMatrix(data = as.factor(tree.class), reference = test_set$Churn)
+tree.roc <- roc(test_set$Churn, tree.prob)
+tree.roc
+plot.roc(tree.roc, main = 'ROC Curve')
+
+fg <- tree.prob[test_set$Churn == 'Yes']
+bg <- tree.prob[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+# Bagging
+
+library(randomForest)
+
+bag_grid <- expand.grid(mtry = c(length(train)-1),
+                       splitrule = c('gini'),
+                       min.node.size = c(2,5,10))
+
+bag.fit <- train(Churn~.,
+                data = train,
+                method = 'ranger',
+                trControl = fitControl,
+                verbose = TRUE,
+                tuneGrid = bag_grid,
+                metric = 'AUC')
+
+bag.up <- train(Churn~.,
+               data = train,
+               method = 'ranger',
+               trControl = fitControl.up,
+               verbose = TRUE,
+               tuneGrid = bag_grid,
+               metric = 'ROC')
+
+bag.down <- train(Churn~.,
+                 data = train,
+                 method = 'ranger',
+                 trControl = fitControl.down,
+                 verbose = TRUE,
+                 tuneGrid = bag_grid,
+                 metric = 'ROC')
+
+train.bag <- randomForest(Churn~., data = train_up, importance=TRUE, ntree = 300, mtry =length(train)-1)
+importance(train.bag)
+varImpPlot(train.bag)
+
+bag.pred <- predict(train.bag, newdata = test_set, type = 'prob')
+bag.pred <- bag.pred[,2]
+thresh = sort(bag.pred[,2],decreasing =TRUE)[3001]
+bag.churn = rep('No', 10000)
+bag.churn[bag.pred[,2]>thresh] = 'Yes'
+table(bag.churn, test_set$Churn)
+confusionMatrix(data = as.factor(bag.churn), reference = test_set$Churn)
+
+bag.roc <- roc(test_set$Churn, bag.pred[,2])
+bag.roc
+plot.roc(bag.roc, main = 'ROC Curve')
+fg <- bag.pred[test_set$Churn == 'Yes']
+bg <- bag.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+# Random Forest
+
+library(randomForest)
+
+rf_grid <- expand.grid(mtry = c(5,7,10,15),
+                           splitrule = c('gini'),
+                           min.node.size = c(2,5,10))
+
+rf.fit <- train(Churn~.,
+                data = train,
+                method = 'ranger',
+                trControl = fitControl,
+                verbose = TRUE,
+                tuneGrid = rf_grid,
+                metric = 'AUC')
+
+rf.up <- train(Churn~.,
+                data = train,
+                method = 'ranger',
+                trControl = fitControl.up,
+                verbose = TRUE,
+                tuneGrid = rf_grid,
+                metric = 'AUC')
+
+rf.down <- train(Churn~.,
+                data = train,
+                method = 'ranger',
+                trControl = fitControl.down,
+                verbose = TRUE,
+                tuneGrid = rf_grid,
+                metric = 'AUC')
+
+
+train.rf <- randomForest(Churn~., data = train_set, importance=TRUE, ntree = 300, mtry =10)
+importance(train.rf)
+varImpPlot(train.rf)
+
+rf.pred <- predict(train.rf, newdata = test_set, type = 'prob')
+rf.pred <- rf.pred[,2]
+rf.churn = rep('No', 10000)
+thresh = sort(rf.pred,decreasing =TRUE)[3001]
+rf.churn[rf.pred>(thresh)] = 'Yes'
+table(rf.churn, test_set$Churn)
+confusionMatrix(data = as.factor(rf.churn), reference = test_set$Churn)
+
+rf.roc <- roc(test_set$Churn, rf.pred[,2])
+rf.roc
+plot.roc(rf.roc, main = 'ROC Curve')
+
+fg <- rf.pred[test_set$Churn == 'Yes']
+bg <- rf.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+# Boosted
+
+library(gbm)
+
+library(caret)
+train$ChurnBin <- factor(ifelse(train$Churn == 'Yes', 1, 0))
+
+gbmGrid <- expand.grid(interaction.depth =c(1,2,3,4),
+                       n.trees = c(100,200,250,300,350,400),
+                       shrinkage = c(0.1,0.01),
+                       n.minobsinnode =c(5,10,20))
+gbm.fit <- train(Churn~.,
+                 data = train,
+                 method = 'gbm',
+                 trControl = fitControl,
+                 verbose = TRUE,
+                 tuneGrid = gbmGrid,
+                 metric = 'AUC')
+
+gbm.up <- train(Churn~.,
+                 data = train,
+                 method = 'gbm',
+                 trControl = fitControl.up,
+                 verbose = TRUE,
+                 tuneGrid = gbmGrid,
+                 metric = 'AUC')
+
+gbm.down <- train(Churn~.,
+                 data = train,
+                 method = 'gbm',
+                 trControl = fitControl.down,
+                 verbose = TRUE,
+                 tuneGrid = gbmGrid,
+                 metric = 'AUC')
+
+
+
+## Boost model
+
+train_balanced$ChurnBin <- ifelse(train_balanced$Churn == 'Yes', 1, 0)
+train_set$ChurnBin <- ifelse(train_set$Churn == 'Yes', 1, 0)
+train_up$ChurnBin <- ifelse(train_up$Churn == 'Yes', 1, 0)
+train.boost <- gbm(ChurnBin~.-Churn, data = train_set, distribution = 'bernoulli', n.trees = 250, interaction.depth = 4)
+summary(train.boost)
+boost.pred <- predict(train.boost, newdata=test_set, type = 'response')
+boost.churn = rep('No', 10000)
+thresh = sort(boost.pred ,decreasing =TRUE)[3001]
+boost.churn[boost.pred>thresh] = 'Yes'
+table(boost.churn, test_set$Churn)
+confusionMatrix(data = as.factor(boost.churn), reference = test_set$Churn)
+
+
+plot(train.boost, i = 'MonthlyRevenue', type = 'response', return.grid = TRUE)
+plot(train.boost, i = 'OverageMinutes', type = 'response')
+boost.roc <- roc(test_set$Churn, boost.pred)
+boost.roc
+plot.roc(boost.roc, main = 'ROC Curve')
+
+fg <- boost.pred[test_set$Churn == 'Yes']
+bg <- boost.pred[test_set$Churn == 'No']
+pr <- pr.curve(scores.class0 = fg, scores.class1 = bg, curve = T)
+plot(pr)
+
+
+# Cross Validation for Precision v ROC
+
+p_vec1 = c(rep(0,5))
+p_vec2 = c(rep(0,10))
+
+for (z in c(1:10)){
+  flds <- createFolds(train$Churn, k = 5, list = TRUE, returnTrain = FALSE)
+  for (i in c(1:5)){
+    names(flds)[i] <- "test"
+    train_set = train[-c(flds$test),]
+    test_set = train[c(flds$test),]
+    train_set$ChurnBin <- ifelse(train_set$Churn == 'Yes', 1, 0)
+    boost.p <- gbm(ChurnBin~.-Churn, data = train_set, distribution = 'bernoulli', n.trees = 500, interaction.depth = 2)
+    p.pred <- predict(boost.p, newdata=test_set, type = 'response')
+    p.thresh = sort(p.pred,decreasing =TRUE)[3000]
+    p.churn = rep('No', length(test_set$Churn))
+    p.churn[p.pred>p.thresh] = 'Yes'
+    ctable = table(p.churn, test_set$Churn)
+    p_vec1[i] = ctable[1,1]/(ctable[1,1]+ctable[1,2])
+  }
+  p_vec2[z] = mean(p_vec1)
+}
+
+mean(p_vec2) # Averaged over 5 iterations of 5 fold CV
+
+# Combined ROC Curve
+
+log.roc <- roc(test_set$Churn, train.logistic.pred)
+
+step.roc <- roc(test_set$Churn, train.stepwise.pred)
+
+ridge.roc <- roc(test_set$Churn, ridge.pred)
+
+lasso.roc <- roc(test_set$Churn, lasso.pred)
+
+gam.roc <- roc(test_set$Churn, gam.pred)
+
+knn.roc <- roc(test_set$Churn, knn.pred)
+
+tree.roc <- roc(test_set$Churn, tree.prob)
+
+bag.roc <- roc(test_set$Churn, bag.pred)
+
+rf.roc <- roc(test_set$Churn, rf.pred)
+
+boost.roc <- roc(test_set$Churn, boost.pred)
+
+plot(log.roc, col = 1, lty = 2, main = 'ROC Curve')
+plot(step.roc, add = TRUE, col = 2,lty = 2)
+plot(ridge.roc, add = TRUE, col = 3,lty = 2)
+plot(lasso.roc , add = TRUE, col = 4,lty = 2)
+plot(gam.roc, add = TRUE, col = 1)
+plot(knn.roc, add = TRUE, col = 2)
+plot(tree.roc, add = TRUE, col = 3)
+plot(bag.roc, add = TRUE, col = 4)
+plot(rf.roc, add = TRUE, col = 5)
+plot(boost.roc, add = TRUE, col = 6)
+legend('bottomright', legend = c('log','log.step','log.ridge','log.lasso','gam','knn','tree','bag','rf','boost'), col = c(1:4,1:6), lty = c(rep(2,4),rep(1,6)))
+
+# Combined PR Curve
+fg.log <- train.logistic.pred[test_set$Churn == 'Yes']
+bg.log <- train.logistic.pred[test_set$Churn == 'No']
+pr.log <- pr.curve(scores.class0 = fg.log, scores.class1 = bg.log, curve = T)
+
+fg.step <- train.stepwise.pred[test_set$Churn == 'Yes']
+bg.step <- train.stepwise.pred[test_set$Churn == 'No']
+pr.step <- pr.curve(scores.class0 = fg.step, scores.class1 = bg.step, curve = T)
+
+fg.ridge <- ridge.pred[test_set$Churn == 'Yes']
+bg.ridge <- ridge.pred[test_set$Churn == 'No']
+pr.ridge <- pr.curve(scores.class0 = fg.ridge, scores.class1 = bg.ridge, curve = T)
+
+fg.lasso <- lasso.pred[test_set$Churn == 'Yes']
+bg.lasso <- lasso.pred[test_set$Churn == 'No']
+pr.lasso <- pr.curve(scores.class0 = fg.lasso, scores.class1 = bg.lasso, curve = T)
+
+fg.gam <- gam.pred[test_set$Churn == 'Yes']
+bg.gam <- gam.pred[test_set$Churn == 'No']
+pr.gam <- pr.curve(scores.class0 = fg.gam, scores.class1 = bg.gam, curve = T)
+
+fg.knn <- knn.pred[test_set$Churn == 'Yes']
+bg.knn <- knn.pred[test_set$Churn == 'No']
+pr.knn <- pr.curve(scores.class0 = fg.knn, scores.class1 = bg.knn, curve = T)
+
+fg.tree <- tree.prob[test_set$Churn == 'Yes']
+bg.tree <- tree.prob[test_set$Churn == 'No']
+pr.tree <- pr.curve(scores.class0 = fg.tree, scores.class1 = bg.tree, curve = T)
+
+fg.bag <- bag.pred[test_set$Churn == 'Yes']
+bg.bag  <- bag.pred[test_set$Churn == 'No']
+pr.bag  <- pr.curve(scores.class0 = fg.bag , scores.class1 = bg.bag , curve = T)
+
+fg.rf <- rf.pred[test_set$Churn == 'Yes']
+bg.rf <- rf.pred[test_set$Churn == 'No']
+pr.rf <- pr.curve(scores.class0 = fg.rf, scores.class1 = bg.rf, curve = T)
+
+fg.boost <- boost.pred[test_set$Churn == 'Yes']
+bg.boost <- boost.pred[test_set$Churn == 'No']
+pr.boost <- pr.curve(scores.class0 = fg.boost, scores.class1 = bg.boost, curve = T)
+
+plot(pr.log, col = 1, lty =2)
+plot(pr.step, add = TRUE, col = 2, lty =2)
+plot(pr.ridge, add = TRUE, col = 3, lty =2)
+plot(pr.lasso, add = TRUE, col = 4, lty =2)
+plot(pr.gam, add = TRUE, col = 1)
+plot(pr.knn, add = TRUE, col = 2)
+plot(pr.tree, add = TRUE, col = 3)
+plot(pr.bag, add = TRUE, col = 4)
+plot(pr.rf, add = TRUE, col = 5)
+plot(pr.boost, add = TRUE, col = 6)
+abline(h=0.288, col = 'purple', lwd = 4, lty=3)
+legend('topright', legend = c('log','log.step','log.ridge','log.lasso','gam','knn','tree','bag','rf','boost'), col = c(1:4,1:6), lty = c(rep(2,4),rep(1,6)))
+
+# Prediction on evalset:
+eval_pred <- eval[-c(1,22)]
+eval_ID <- eval[1]
+
+library(Hmisc)
+
+fmla <- as.formula(paste(" ~ ", paste(names(eval_pred), collapse=" +")))
+impute_hmisc_eval <- aregImpute(fmla, data = eval_pred, n.impute = 5, nk=0)
+
+# Replacing NA values with the average imputation value
+eval_pred$MaritalStatus = as.numeric(as.factor(eval_pred$MaritalStatus))
+eval_pred$MonthlyRevenue[is.na(eval_pred$MonthlyRevenue)] <- apply(impute_hmisc_eval$imputed$MonthlyRevenue,1,mean)
+eval_pred$MonthlyMinutes[is.na(eval_pred$MonthlyMinutes)] <- apply(impute_hmisc_eval$imputed$MonthlyMinutes,1,mean)
+eval_pred$TotalRecurringCharge[is.na(eval_pred$TotalRecurringCharge)] <- apply(impute_hmisc_eval$imputed$TotalRecurringCharge,1,mean)
+eval_pred$OverageMinutes[is.na(eval_pred$OverageMinutes)] <- apply(impute_hmisc_eval$imputed$OverageMinutes,1,mean)
+eval_pred$RoamingCalls[is.na(eval_pred$RoamingCalls)] <- round(apply(impute_hmisc_eval$imputed$RoamingCalls,1,mean))
+eval_pred$AgeHH1[is.na(eval_pred$AgeHH1)] <- round(apply(impute_hmisc_eval$imputed$AgeHH1,1,mean))
+eval_pred$AgeHH2[is.na(eval_pred$AgeHH2)] <- round(apply(impute_hmisc_eval$imputed$AgeHH2,1,mean))
+eval_pred$HandsetPrice[is.na(eval_pred$HandsetPrice)] <- round(apply(impute_hmisc_eval$imputed$HandsetPrice,1,mean))
+eval_pred$MaritalStatus[is.na(eval_pred$MaritalStatus)] <- round(apply(impute_hmisc_eval$imputed$MaritalStatus,1,mean))
+eval_pred$MaritalStatus <- as.factor(ifelse(eval_pred$MaritalStatus == 1, 'No', 'Yes'))
+
+train$ChurnBin <- ifelse(train$Churn == 'Yes', 1, 0)
+train.boost <- gbm(ChurnBin~.-Churn, data = train, distribution = 'bernoulli', n.trees = 250, interaction.depth = 4)
+summary(train.boost)
+boost.pred <- predict(train.boost, newdata=eval_pred, type = 'response')
+final_predictions <- cbind(eval_ID, boost.pred)
+f_pred_ordered <- final_predictions[order(final_predictions$boost.pred, decreasing = TRUE),]
+row.names(f_pred_ordered) <- NULL
+answer <- f_pred_ordered[1:3000, 1]
+write.csv(answer, 'answer.csv')
