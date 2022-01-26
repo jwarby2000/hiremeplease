@@ -1,6 +1,6 @@
 Atlassian Datathon related files
 
-- Winner
+- Winner of the competition (out of 27 teams)!! 
 - Presentation and code (R) provided
 - Prediction of the 32 teams most likely to qualify for the 2022 FIFA World Cup
 - Method: Create a model to predict outcomes of games, then simulate each of the confederation groups and resulting inter confederation games to see who qualifies. Monte Carlo simulation is used to get the probability of qualification based on thousands of simulation runs. 
