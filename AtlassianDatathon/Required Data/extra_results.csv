@@ -1,0 +1,153 @@
+﻿date,home_team,away_team,home_score,away_score
+2021-09-01,Central African Republic,Cape Verde Islands,1,1
+2021-09-01,Senegal,Togo,2,0
+2021-09-01,Guinea-Bissau,Guinea,1,1
+2021-09-01,Mali,Rwanda,1,0
+2021-09-01,Egypt,Angola,1,0
+2021-09-01,Libya,Gabon,2,1
+2021-09-02,Kenya,Uganda,0,0
+2021-09-02,Congo DR,Tanzania,1,1
+2021-09-02,Niger,Burkina,0,2
+2021-09-02,Namibia,Congo,1,1
+2021-09-02,Madagascar,Benin,0,1
+2021-09-02,Algeria,Djibouti,8,0
+2021-09-02,Morocco,Sudan,2,0
+2021-09-02,Mozambique,Ivory Coast,0,0
+2021-09-02,Zimbabwe,South Africa,0,0
+2021-09-02,Mauritania,Zambia,1,2
+2021-09-02,Nigeria,Liberia,2,0
+2021-09-02,Tunisia,Equatorial Guinea,3,0
+2021-09-02,Cameroon,Malawi,2,0
+2021-09-02,Ghana,Ethiopia,1,0
+2021-09-02,Rwanda,Kenya,1,1
+2021-09-05,Togo,Namibia,0,1
+2021-09-05,Gabon,Egypt,1,1
+2021-09-06,Djibouti,Niger,2,4
+2021-09-06,Uganda,Mali,0,0
+2021-09-06,Benin,Congo DR,1,1
+2021-09-06,Central African Republic,Liberia,1,0
+2021-09-06,South Africa,Ghana,1,0
+2021-09-06,Ivory Coast,Cameroon,2,1
+2021-09-06,Zambia,Tunisia,0,2
+2021-09-06,Malawi,Mozambique,1,0
+2021-09-06,Ethiopia,Zimbabwe,1,0
+2021-09-06,Tanzania,Madagascar,3,2
+2021-09-06,Equatorial Guinea,Mauritania,1,0
+2021-09-06,Cape Verde Islands,Nigeria,1,2
+2021-09-06,Congo,Senegal,1,3
+2021-09-06,Burkina,Algeria,1,1
+2021-09-06,Angola,Libya,0,1
+2021-09-06,Sudan,Guinea-Bissau,2,4
+2021-09-02,Japan,Oman,0,1
+2021-09-02,South Korea,Iraq,0,0
+2021-09-02,Iran,Syria,1,0
+2021-09-02,United Arab Emirates,Lebanon,0,0
+2021-09-02,Australia,China,3,0
+2021-09-02,Saudi Arabia,Vietnam,3,1
+2021-09-02,South Korea,Lebanon,1,0
+2021-09-02,Vietnam,Australia,0,1
+2021-09-02,China,Japan,0,1
+2021-09-02,Syria,United Arab Emirates,1,1
+2021-09-02,Oman,Saudi Arabia,0,1
+2021-09-02,Iraq,Iran,0,3
+2021-09-02,Bolivia,Colombia,1,1
+2021-09-02,Ecuador,Paraguay,2,0
+2021-09-02,Venezuela,Argentina,1,3
+2021-09-02,Chile,Brazil,0,1
+2021-09-02,Peru,Uruguay,1,1
+2021-09-02,Ecuador,Chile,0,0
+2021-09-02,Paraguay,Colombia,1,1
+2021-09-02,Uruguay,Bolivia,4,2
+2021-09-02,Peru,Venezuela,1,0
+2021-09-02,Uruguay,Ecuador,1,0
+2021-09-02,Paraguay,Venezuela,2,1
+2021-09-02,Colombia,Chile,3,1
+2021-09-02,Argentina,Bolivia,3,0
+2021-09-02,Brazil,Peru,2,0
+2021-09-02,Canada,Honduras,1,1
+2021-09-02,Panama,Costa Rica,0,0
+2021-09-02,Mexico,Jamaica,2,1
+2021-09-02,El Salvador,United States,0,0
+2021-09-02,El Salvador,Honduras,0,0
+2021-09-02,Costa Rica,Mexico,0,1
+2021-09-02,United States,Canada,1,1
+2021-09-02,Jamaica,Panama,0,3
+2021-09-02,Canada,El Salvador,3,0
+2021-09-02,Panama,Mexico,1,1
+2021-09-02,Costa Rica,Jamaica,1,1
+2021-09-02,Honduras,United States,1,4
+2021-09-02,Kazakhstan,Ukraine,2,2
+2021-09-02,Luxembourg,Azerbaijan,2,1
+2021-09-02,Portugal,Republic of Ireland,2,1
+2021-09-02,France,Bosnia-Herzegovina,1,1
+2021-09-02,Denmark,Scotland,2,0
+2021-09-02,Faroe Islands,Israel,0,4
+2021-09-02,Moldova,Austria,0,2
+2021-09-02,Latvia,Gibraltar,3,1
+2021-09-02,Norway,Netherlands,1,1
+2021-09-02,Turkey,Montenegro,2,2
+2021-09-02,Malta,Cyprus,3,0
+2021-09-02,Russia,Croatia,0,0
+2021-09-02,Slovenia,Slovakia,1,1
+2021-09-02,Georgia,Kosovo,0,1
+2021-09-02,Italy,Bulgaria,1,1
+2021-09-02,Lithuania,Northern Ireland,1,4
+2021-09-02,Czech Republic,Belarus,1,0
+2021-09-02,Estonia,Belgium,2,5
+2021-09-02,Andorra,San Marino,2,0
+2021-09-02,Hungary,England,0,4
+2021-09-02,Poland,Albania,4,1
+2021-09-02,Iceland,Romania,0,2
+2021-09-02,Liechtenstein,Germany,0,2
+2021-09-02,North Macedonia,Armenia,0,0
+2021-09-02,Sweden,Spain,2,1
+2021-09-02,Finland,Kazakhstan,1,0
+2021-09-02,Republic of Ireland,Azerbaijan,1,1
+2021-09-02,Serbia,Luxembourg,4,1
+2021-09-02,Latvia,Norway,0,2
+2021-09-02,Cyprus,Russia,0,2
+2021-09-02,Slovenia,Malta,1,0
+2021-09-02,Ukraine,France,1,1
+2021-09-02,Faroe Islands,Denmark,0,1
+2021-09-02,Israel,Austria,5,2
+2021-09-02,Scotland,Moldova,1,0
+2021-09-02,Gibraltar,Turkey,0,3
+2021-09-02,Netherlands,Montenegro,4,0
+2021-09-02,Slovakia,Croatia,0,1
+2021-09-02,Belarus,Wales,2,3
+2021-09-02,Bulgaria,Lithuania,1,0
+2021-09-02,Albania,Hungary,1,0
+2021-09-02,England,Andorra,4,0
+2021-09-02,Iceland,North Macedonia,2,2
+2021-09-02,Switzerland,Italy,0,0
+2021-09-02,Belgium,Czech Republic,3,0
+2021-09-02,San Marino,Poland,1,7
+2021-09-02,Germany,Armenia,6,0
+2021-09-02,Romania,Liechtenstein,2,0
+2021-09-02,Kosovo,Greece,1,1
+2021-09-02,Spain,Georgia,4,0
+2021-09-02,Azerbaijan,Portugal,0,3
+2021-09-02,Republic of Ireland,Serbia,1,1
+2021-09-02,Bosnia-Herzegovina,Kazakhstan,2,2
+2021-09-02,France,Finland,2,0
+2021-09-02,Montenegro,Latvia,0,0
+2021-09-02,Netherlands,Turkey,6,1
+2021-09-02,Norway,Gibraltar,5,1
+2021-09-02,Croatia,Slovenia,3,0
+2021-09-02,Russia,Malta,2,0
+2021-09-02,Slovakia,Cyprus,2,0
+2021-09-02,Austria,Scotland,0,1
+2021-09-02,Denmark,Israel,5,0
+2021-09-02,Faroe Islands,Moldova,2,1
+2021-09-02,Armenia,Liechtenstein,1,1
+2021-09-02,Italy,Lithuania,5,0
+2021-09-02,Northern Ireland,Switzerland,0,0
+2021-09-02,Belarus,Belgium,0,1
+2021-09-02,Wales,Estonia,0,0
+2021-09-02,Iceland,Germany,0,4
+2021-09-02,North Macedonia,Romania,0,0
+2021-09-02,Greece,Sweden,2,1
+2021-09-02,Kosovo,Spain,0,2
+2021-09-02,Albania,San Marino,5,0
+2021-09-02,Hungary,Andorra,2,1
+2021-09-02,Poland,England,1,1
