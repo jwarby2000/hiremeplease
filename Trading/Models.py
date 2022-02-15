@@ -303,7 +303,4 @@ def CNNModel(X_Train, Y_Train, X_Test, Y_Test, dropout = 0.5, epochs = 5, optimi
 
     return pred_vec, test_acc, model
 
-    #while train_loss > 0.6920: # Retrain if the model gets stuck in a local minima instantly and therefore cannot find a good solution
-        #model.compile(loss = "categorical_crossentropy", optimizer = optimizer, metrics = ['accuracy'])    
-        #history = model.fit(X_Train_, Y_Train, epochs = 2, validation_data = (X_Test_, Y_Test))      
-        #train_loss, train_acc = model.evaluate(X_Train_, Y_Train)  
+
