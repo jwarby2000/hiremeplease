@@ -114,20 +114,15 @@ pred_vec, test_acc, y_proba, y_std, model = CNNLSTM(X_Train, Y_Train, X_Valid, Y
 pred_vec, test_acc, model = CNNModel(X_Train, Y_Train, X_Test, Y_Test, dropout = 0.1, epochs = 5)
 
 
-### Creating the Tests
+# Test Function tests
     
 Comp_Ret, account, trades = SimFunction(pred_vec[:,1], Y_Valid_Actual_ML, comm = 0.00075, plot = True)
-
-# Test Function - Are the None defaults good?
 
 t = TestFunction(X_Train_ML, Y_Train_ML, X_Valid_ML, Y_Valid_ML, Y_Valid_Actual_ML, model_name = 'XGB', model_type = 'ML', feature_list = feature_list, Lagged = Lagged, param = param)
 t = TestFunction(X_Train, Y_Train, X_Valid, Y_Valid, Y_Valid_Actual, epochs = 5, n_exp = 3)
 
 
-# Need to train models on train set, make predictions on validation. Then we need to train on train + validation and make predictions on test.
-
-
-# If stacking is false then it only needs train, valid, but if stacking is true it needs train, valid and test
+# Ensemble Learning
   
 model_list = ['LSTM', 'RNN', 'MLP', 'XGB', 'RF']
 
